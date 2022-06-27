@@ -1,0 +1,8 @@
+[Service]
+# This is a file that "kubeadm" generates at runtime, populating the KUBE_CONTROLLER_MANAGER_EXTRA_ARGS variable dynamically
+EnvironmentFile=-/var/lib/kubelet/kube-controller-manager.env
+# This is a file that the user can use for overrides of the kubelet args as a last resort.
+# KUBE_CONTROLLER_MANAGER_EXTRA_ARGS should be sourced from this file.
+EnvironmentFile=-/etc/default/kube-controller-manager
+ExecStart=
+ExecStart=/usr/local/bin/kube-controller-manager $KUBE_CONTROLLER_MANAGER_EXTRA_ARGS

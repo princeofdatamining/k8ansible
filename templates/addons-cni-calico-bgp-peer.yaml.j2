@@ -1,0 +1,8 @@
+---
+kind: BGPPeer
+apiVersion: crd.projectcalico.org/v1
+metadata:
+  name: peer-with-route-reflectors
+spec:
+  nodeSelector: all()
+  peerSelector: route-reflector == 'true'

@@ -1,0 +1,81 @@
+# https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/setup-ha-etcd-with-kubeadm/
+# 部署独立的 etcd 高可用集群
+---
+-   hosts: k8s_etcd_hosts
+    become: true
+    tasks:
+    -   ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+        loop:
+        -   "{{ k8s_pki.dir }}"
+        -   "{{ k8s_pki.dir }}/etcd"
+
+    -   name: stat etcd/ca.crt
+        ansible.builtin.stat:
+            path: "{{ k8s_pki.dir }}/etcd/ca.crt"
+        register: st_etcd_ca
+    -   name: Generating "etcd/ca" certificate and key
+        ansible.builtin.command: kubeadm init phase certs etcd-ca --config={{ k8s.dir }}/kubeadm/init-etcd.yaml
+        when: ansible_facts.nodename == hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename and st_etcd_ca.stat.exists == False
+    -   name: sync etcd/ca.crt
+        ansible.builtin.copy:
+            dest: "{{ k8s_pki.dir }}/{{ item }}"
+            src: "{{ k8s_pki.dir }}/{{ item }}"
+        loop:
+        -   "etcd/ca.crt"
+        -   "etcd/ca.key"
+        when: ansible_facts.nodename != hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename
+
+    -   name: stat etcd/server.crt
+        ansible.builtin.stat:
+            path: "{{ k8s_pki.dir }}/etcd/server.crt"
+        register: st_etcd_server
+    -   name: Generating "etcd/server" certificate and key
+        ansible.builtin.command: kubeadm init phase certs etcd-server --config={{ k8s.dir }}/kubeadm/init-etcd.yaml
+        when: st_etcd_server.stat.exists == False
+
+    -   name: stat etcd/peer.crt
+        ansible.builtin.stat:
+            path: "{{ k8s_pki.dir }}/etcd/peer.crt"
+        register: st_etcd_peer
+    -   name: Generating "etcd/peer" certificate and key
+        ansible.builtin.command: kubeadm init phase certs etcd-peer --config={{ k8s.dir }}/kubeadm/init-etcd.yaml
+        when: st_etcd_peer.stat.exists == False
+
+    -   name: stat etcd/healthcheck-client.crt
+        ansible.builtin.stat:
+            path: "{{ k8s_pki.dir }}/etcd/healthcheck-client.crt"
+        register: st_etcd_healthcheck_client
+    -   name: Generating "etcd/healthcheck-client" certificate and key
+        ansible.builtin.command: kubeadm init phase certs etcd-healthcheck-client --config={{ k8s.dir }}/kubeadm/init-etcd.yaml
+        when: st_etcd_healthcheck_client.stat.exists == False
+
+    -   name: prepare directories
+        ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+        loop:
+        -   /etc/etcd
+
+    # https://github.com/etcd-io/etcd/blob/main/etcd.conf.yml.sample
+    # etcd 配置
+    -   name: /etc/etcd/etcd.config.yml
+        ansible.builtin.template:
+            dest: "/etc/etcd/etcd.config.yml"
+            src:  "templates/etc-etcd.config.yml.j2"
+
+    # https://github.com/etcd-io/etcd/blob/main/contrib/systemd/etcd.service
+    # systemd service
+    -   name: /usr/lib/systemd/system/etcd.service
+        ansible.builtin.template:
+            dest: "/usr/lib/systemd/system/etcd.service"
+            src:  "templates/systemd-etcd.service.j2"
+        notify: start etcd
+
+    handlers:
+    -   listen: start etcd
+        ansible.builtin.service:
+            name: etcd
+            enabled: true
+            state: started

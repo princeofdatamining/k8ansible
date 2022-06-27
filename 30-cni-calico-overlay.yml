@@ -1,0 +1,27 @@
+# You should now deploy a pod network to the cluster.
+# Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
+# https://kubernetes.io/docs/concepts/cluster-administration/addons/
+#
+# https://projectcalico.docs.tigera.io/getting-started/kubernetes/quickstart
+# https://projectcalico.docs.tigera.io/manifests/tigera-operator.yaml
+# curl -L https://projectcalico.docs.tigera.io/manifests/custom-resources.yaml | sed 's|192.168.0.0/16|{{ k8s_networking.pod }}|' | tee templates/addons-cni-calico.yaml.j2
+---
+-   hosts: k8s_adm_hosts[0]
+    gather_facts: false
+    become: true
+    tasks:
+
+    # https://projectcalico.docs.tigera.io/manifests/custom-resources.yaml
+    -   name: "cni - calico - overlay manifests"
+        ansible.builtin.template:
+            src: templates/addons-cni-calico-overlay.yaml.j2
+            dest: "{{ k8s.dir }}/kubeadm/calico-overlay.yaml"
+        notify: apply addons/cni/calico
+
+    handlers:
+    # https://projectcalico.docs.tigera.io/getting-started/kubernetes/quickstart
+    # https://projectcalico.docs.tigera.io/manifests/tigera-operator.yaml
+    -   name: apply addons/cni/calico
+        ansible.builtin.shell: |
+            kubectl apply -f https://{{ download_cdn }}projectcalico.docs.tigera.io/manifests/tigera-operator.yaml
+            kubectl apply -f {{ k8s.dir }}/kubeadm/calico-overlay.yaml

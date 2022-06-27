@@ -1,0 +1,343 @@
+# https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/high-availability/
+# 部署 k8s 高可用集群
+---
+-   hosts: k8s_cp_hosts
+    become: true
+    tasks:
+    -   ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+        loop:
+        -   "{{ k8s_pki.dir }}"
+        -   "{{ k8s_pki.dir }}/etcd"
+        -   "/etc/systemd/system/kube-apiserver.service.d"
+        -   "/etc/systemd/system/kube-controller-manager.service.d"
+        -   "/etc/systemd/system/kube-scheduler.service.d"
+
+    ##########
+    # ✅etcd #
+    ##########
+
+    -   name: sync etcd/ca.crt
+        ansible.builtin.copy:
+            dest: "{{ k8s_pki.dir }}/{{ item }}"
+            src: "{{ k8s_pki.dir }}/{{ item }}"
+        loop:
+        -   "etcd/ca.crt"
+        -   "etcd/ca.key"
+        when: ansible_facts.nodename != hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename
+
+    -   name: stat apiserver-etcd-client.crt
+        ansible.builtin.stat:
+            path: "{{ k8s_pki.dir }}/apiserver-etcd-client.crt"
+        register: st_etcd_apiserver_client
+    -   name: Generating "apiserver-etcd-client" certificate and key
+        ansible.builtin.command: kubeadm init phase certs apiserver-etcd-client --config={{ k8s.dir }}/kubeadm/init-etcd.yaml
+        when: st_etcd_apiserver_client.stat.exists == False
+
+    #####################################################
+    # ✅init phase certs                                #
+    # ✅join phase control-plane-prepare download-certs #
+    # ✅join phase control-plane-prepare certs          #
+    #####################################################
+
+    -   name: stat ca.crt
+        ansible.builtin.stat:
+            path: "{{ k8s_pki.dir }}/ca.crt"
+        register: st_ca
+    -   name: Generating "ca" certificate and key
+        ansible.builtin.command: kubeadm init phase certs ca --config={{ k8s.dir }}/kubeadm/init.yaml
+        when: ansible_facts.nodename == hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename and st_ca.stat.exists == False
+    -   name: sync ca.crt
+        ansible.builtin.copy:
+            dest: "{{ k8s_pki.dir }}/{{ item }}"
+            src: "{{ k8s_pki.dir }}/{{ item }}"
+        loop:
+        -   "ca.crt"
+        -   "ca.key"
+        when: ansible_facts.nodename != hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename
+
+    -   name: stat apiserver.crt
+        ansible.builtin.stat:
+            path: "{{ k8s_pki.dir }}/apiserver.crt"
+        register: st_apiserver
+    -   name: Generating "apiserver" certificate and key
+        ansible.builtin.command: kubeadm init phase certs apiserver --config={{ k8s.dir }}/kubeadm/init.yaml
+        when: st_apiserver.stat.exists == False
+
+    -   name: stat apiserver-kubelet-client.crt
+        ansible.builtin.stat:
+            path: "{{ k8s_pki.dir }}/apiserver-kubelet-client.crt"
+        register: st_apiserver_kubelet_client
+    -   name: Generating "apiserver-kubelet-client" certificate and key
+        ansible.builtin.command: kubeadm init phase certs apiserver-kubelet-client --config={{ k8s.dir }}/kubeadm/init.yaml
+        when: st_apiserver_kubelet_client.stat.exists == False
+
+
+    -   name: stat front-proxy-ca
+        ansible.builtin.stat:
+            path: "{{ k8s_pki.dir }}/front-proxy-ca.crt"
+        register: st_front_proxy_ca
+    -   name: Generating "front-proxy-ca" certificate and key
+        ansible.builtin.command: kubeadm init phase certs front-proxy-ca --config={{ k8s.dir }}/kubeadm/init.yaml
+        when: ansible_facts.nodename == hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename and st_front_proxy_ca.stat.exists == False
+    -   name: sync front-proxy-ca.crt
+        ansible.builtin.copy:
+            dest: "{{ k8s_pki.dir }}/{{ item }}"
+            src: "{{ k8s_pki.dir }}/{{ item }}"
+        loop:
+        -   "front-proxy-ca.crt"
+        -   "front-proxy-ca.key"
+        when: ansible_facts.nodename != hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename
+
+    -   name: stat front-proxy-client
+        ansible.builtin.stat:
+            path: "{{ k8s_pki.dir }}/front-proxy-client.crt"
+        register: st_front_proxy_client
+    -   name: Generating "front-proxy-client" certificate and key
+        ansible.builtin.command: kubeadm init phase certs front-proxy-client --config={{ k8s.dir }}/kubeadm/init.yaml
+        when: st_front_proxy_client.stat.exists == False
+
+
+    -   name: stat sa.pub
+        ansible.builtin.stat:
+            path: "{{ k8s_pki.dir }}/sa.pub"
+        register: st_sa
+    -   name: Generating "sa" key and public key
+        ansible.builtin.command: kubeadm init phase certs sa --cert-dir={{ k8s_pki.dir }}
+        when: ansible_facts.nodename == hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename and st_sa.stat.exists == False
+    -   name: sync sa.pub
+        ansible.builtin.copy:
+            dest: "{{ k8s_pki.dir }}/{{ item }}"
+            src: "{{ k8s_pki.dir }}/{{ item }}"
+        loop:
+        -   "sa.pub"
+        -   "sa.key"
+        when: ansible_facts.nodename != hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename
+
+    #################################################
+    # ✅init phase kubeconfig                       #
+    # ✅join phase control-plane-prepare kubeconfig #
+    #################################################
+
+    -   name: stat controller-manager.conf
+        ansible.builtin.stat:
+            path: "{{ k8s.dir }}/controller-manager.conf"
+        register: st_controller_manager
+    -   name: '[kubeconfig] Writing "controller-manager.conf" kubeconfig file'
+        ansible.builtin.command: kubeadm init phase kubeconfig controller-manager --config={{ k8s.dir }}/kubeadm/init.yaml
+        when: st_controller_manager.stat.exists == False
+    # clusters[0].cluster.server                     = "https://<LOCAL_IP>:6443" # localEndpoint
+    # clusters[0].name = contexts[0].context.cluster = "kubernetes"
+    # users[0].name    = contexts[0].context.user    = "system:kube-controller-manager"
+    # current-context  = contexts[0].name            = "system:kube-controller-manager@kubernetes"
+
+    -   name: stat scheduler.conf
+        ansible.builtin.stat:
+            path: "{{ k8s.dir }}/scheduler.conf"
+        register: st_scheduler
+    -   name: '[kubeconfig] Writing "scheduler.conf" kubeconfig file'
+        ansible.builtin.command: kubeadm init phase kubeconfig scheduler --config={{ k8s.dir }}/kubeadm/init.yaml
+        when: st_scheduler.stat.exists == False
+    # clusters[0].cluster.server                     = "https://<LOCAL_IP>:6443" # localEndpoint
+    # clusters[0].name = contexts[0].context.cluster = "kubernetes"
+    # users[0].name    = contexts[0].context.user    = "system:kube-scheduler"
+    # current-context  = contexts[0].name            = "system:kube-scheduler@kubernetes"
+
+    -   name: stat admin.conf
+        ansible.builtin.stat:
+            path: "{{ k8s.dir }}/admin.conf"
+        register: st_admin
+    -   name: '[kubeconfig] Writing "admin.conf" kubeconfig file'
+        ansible.builtin.command: kubeadm init phase kubeconfig admin --config={{ k8s.dir }}/kubeadm/init.yaml
+        when: st_admin.stat.exists == False
+    # clusters[0].cluster.server                     = "https://k8slb.cnicg.io:6443" # controlPlaneEndpoint
+    # clusters[0].name = contexts[0].context.cluster = "kubernetes"
+    # users[0].name    = contexts[0].context.user    = "kubernetes-admin"
+    # current-context  = contexts[0].name            = "kubernetes-admin@kubernetes"
+
+    -   name: stat kubelet.conf
+        ansible.builtin.stat:
+            path: "{{ k8s.dir }}/kubelet.conf"
+        register: st_kubelet
+    -   name: stat /var/lib/kubelet/config.yaml
+        ansible.builtin.stat:
+            path: "/var/lib/kubelet/config.yaml"
+        register: st_var_lib_kubelet
+
+    ##############################
+    # ✅init phase kubelet-start #
+    ##############################
+
+    -   name: '[kubeconfig] Writing "kubelet.conf" kubeconfig file'
+        ansible.builtin.command: kubeadm init phase kubeconfig kubelet --config={{ k8s.dir }}/kubeadm/init.yaml
+        when: ansible_facts.nodename == hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename and st_kubelet.stat.exists == False
+    # clusters[0].cluster.server                     = "https://k8slb.cnicg.io:6443" # controlPlaneEndpoint
+    # clusters[0].name = contexts[0].context.cluster = "kubernetes"
+    # users[0].name    = contexts[0].context.user    = "system:node:k8sjp.cnicg.io"
+    # current-context  = contexts[0].name            = "system:node:k8sjp.cnicg.io@kubernetes"
+
+    -   name: '[kubelet-start] Starting the kubelet'
+        ansible.builtin.command: kubeadm init phase kubelet-start --config={{ k8s.dir }}/kubeadm/init.yaml
+        when: ansible_facts.nodename == hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename and st_var_lib_kubelet.stat.exists == False
+
+    ##################################################
+    # ✅init phase control-plane                       #
+    # ✅join phase control-plane-prepare control-plane #
+    ##################################################
+
+    -   name: '[control-plane] Creating static Pod manifest for "kube-apiserver"'
+        ansible.builtin.template:
+            src: "templates/systemd-kube-apiserver.service{{ item.suffix }}.j2"
+            dest: "{{ item.dest }}"
+        loop:
+        -   { suffix: ""               , dest: "/etc/systemd/system/kube-apiserver.service" }
+        -   { suffix: ".d-10-args.conf", dest: "/etc/systemd/system/kube-apiserver.service.d/10-args.conf" }
+        -   { suffix: ".d-env"         , dest: "/var/lib/kubelet/kube-apiserver.env" }
+        notify: start kube-apiserver.service
+
+    -   name: '[control-plane] Creating static Pod manifest for "kube-controller-manager"'
+        ansible.builtin.template:
+            src: "templates/systemd-kube-controller-manager.service{{ item.suffix }}.j2"
+            dest: "{{ item.dest }}"
+        loop:
+        -   { suffix: ""               , dest: "/etc/systemd/system/kube-controller-manager.service" }
+        -   { suffix: ".d-10-args.conf", dest: "/etc/systemd/system/kube-controller-manager.service.d/10-args.conf" }
+        -   { suffix: ".d-env"         , dest: "/var/lib/kubelet/kube-controller-manager.env" }
+        notify: start kube-controller-manager.service
+
+    -   name: '[control-plane] Creating static Pod manifest for "kube-scheduler"'
+        ansible.builtin.template:
+            src: "templates/systemd-kube-scheduler.service{{ item.suffix }}.j2"
+            dest: "{{ item.dest }}"
+        loop:
+        -   { suffix: ""               , dest: "/etc/systemd/system/kube-scheduler.service" }
+        -   { suffix: ".d-10-args.conf", dest: "/etc/systemd/system/kube-scheduler.service.d/10-args.conf" }
+        -   { suffix: ".d-env"         , dest: "/var/lib/kubelet/kube-scheduler.env" }
+        notify: start kube-scheduler.service
+
+    -   meta: flush_handlers
+
+    ######################################
+    # ✅init phase upload-config kubeadm #
+    # ✅init phase upload-config kubelet #
+    # ✅init phase mark-control-plane    #
+    # ✅init phase bootstrap-token       #
+    # ✅init phase kubelet-finalize all  #
+    # ✅init phase addon coredns         #
+    # ✅init phase addon kube-proxy      #
+    ######################################
+
+    -   name: stat kubeadm/join.env
+        ansible.builtin.stat:
+            path: "{{ k8s.dir }}/kubeadm/join.env"
+        register: st_kubeadm_join_env
+    -   name: '[kubelet-finalize]'
+        ansible.builtin.shell: |
+            kubeadm init phase upload-config kubeadm --config={{ k8s.dir }}/kubeadm/init.yaml
+            kubeadm init phase upload-config kubelet --config={{ k8s.dir }}/kubeadm/init.yaml
+            kubeadm init phase mark-control-plane    --config={{ k8s.dir }}/kubeadm/init.yaml
+            kubeadm init phase bootstrap-token       --config={{ k8s.dir }}/kubeadm/init.yaml | tee {{ k8s.dir }}/kubeadm/bootstrap-token.log
+            kubeadm init phase kubelet-finalize all  --config={{ k8s.dir }}/kubeadm/init.yaml
+            kubeadm init phase addon coredns         --config={{ k8s.dir }}/kubeadm/init.yaml
+            kubeadm init phase addon kube-proxy      --config={{ k8s.dir }}/kubeadm/init.yaml
+            #
+            export CERT_HASH=$(openssl x509 -pubkey -in {{ k8s_pki.dir }}/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //')
+            export TOKEN=$(grep 'token:' {{ k8s.dir }}/kubeadm/bootstrap-token.log | awk '{print $4}')
+            #
+            echo "{{ k8s_slb.domain_name }}:6443 --token ${TOKEN} --discovery-token-ca-cert-hash sha256:${CERT_HASH}" | tee {{ k8s.dir }}/kubeadm/join.env
+        when: ansible_facts.nodename == hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename and st_kubeadm_join_env.stat.exists == False
+
+    -   name: export kube-proxy configMap
+        ansible.builtin.shell: |
+            export KUBECONFIG={{ k8s.dir }}/admin.conf
+            kubectl get configmap -n kube-system kube-proxy -o yaml | sed 's|^\(\s*\)mode:.*|\1mode: "{{ k8s_networking.proxy_mode }}"|' | tee /tmp/kube-proxy-configmap
+        when: ansible_facts.nodename == hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename and k8s_networking.proxy_mode != ""
+    -   name: stat kube-proxy configMap
+        ansible.builtin.stat:
+            path: "/tmp/kube-proxy-configmap"
+        register: st_kube_proxy_configmap
+    -   name: diff kube-proxy configMap
+        ansible.builtin.copy:
+            src: "/tmp/kube-proxy-configmap"
+            dest: "{{ k8s.dir }}/kubeadm/kube-proxy-configmap.yaml"
+            remote_src: true
+        when: ansible_facts.nodename == hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename and st_kube_proxy_configmap.stat.exists == True
+        notify: reload kube-proxy configMap
+    -   meta: flush_handlers
+
+    -   name: sync join.env
+        ansible.builtin.copy:
+            dest: "{{ k8s.dir }}/kubeadm/join.env"
+            src: "{{ k8s.dir }}/kubeadm/join.env"
+        when: ansible_facts.nodename != hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename
+
+    ######################################################
+    # ✅join phase kubelet-start                         #
+    # ✅join phase control-plane-join mark-control-plane #
+    ######################################################
+
+    -   name: 'control-plane-join'
+        ansible.builtin.shell: |
+            kubeadm join phase kubelet-start $(cat {{ k8s.dir }}/kubeadm/join.env)
+            kubeadm join phase control-plane-join mark-control-plane --control-plane
+        when: ansible_facts.nodename != hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename and st_kubelet.stat.exists == False and st_var_lib_kubelet.stat.exists == False
+    # clusters[0].name = contexts[0].context.cluster = "default-cluster"
+    # users[0].name    = contexts[0].context.user    = "default-auth"
+    # current-context  = contexts[0].name            = "default-context"
+    #                    contexts[0].namespace       = "default"
+
+    handlers:
+
+    -   name: start kube-apiserver.service
+        ansible.builtin.service:
+            name: kube-apiserver
+            enabled: true
+            state: started
+
+    -   name: start kube-controller-manager.service
+        ansible.builtin.service:
+            name: kube-controller-manager
+            enabled: true
+            state: started
+
+    -   name: start kube-scheduler.service
+        ansible.builtin.service:
+            name: kube-scheduler
+            enabled: true
+            state: started
+
+    -   name: reload kube-proxy configMap
+        ansible.builtin.shell: |
+            export KUBECONFIG={{ k8s.dir }}/admin.conf
+            kubectl apply -f {{ k8s.dir }}/kubeadm/kube-proxy-configmap.yaml
+        when: ansible_facts.nodename == hostvars[groups.k8s_adm_hosts[0]].ansible_facts.nodename
+
+-   hosts: k8s_node_hosts
+    become: true
+    tasks:
+    -   ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+        loop:
+        -   "{{ k8s.dir }}"
+        -   "{{ k8s.dir }}/kubeadm"
+
+    -   name: sync join.env
+        ansible.builtin.copy:
+            dest: "{{ k8s.dir }}/kubeadm/join.env"
+            src: "{{ k8s.dir }}/kubeadm/join.env"
+
+    -   name: stat kubelet.conf
+        ansible.builtin.stat:
+            path: "{{ k8s.dir }}/kubelet.conf"
+        register: st_kubelet
+    -   name: stat /var/lib/kubelet/config.yaml
+        ansible.builtin.stat:
+            path: "/var/lib/kubelet/config.yaml"
+        register: st_var_lib_kubelet
+
+    -   name: 'join'
+        ansible.builtin.shell: |
+            kubeadm join phase kubelet-start $(cat {{ k8s.dir }}/kubeadm/join.env)
+        when: st_kubelet.stat.exists == False and st_var_lib_kubelet.stat.exists == False

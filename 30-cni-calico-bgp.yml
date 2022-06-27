@@ -1,0 +1,87 @@
+# You should now deploy a pod network to the cluster.
+# Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
+# https://kubernetes.io/docs/concepts/cluster-administration/addons/
+#
+# https://projectcalico.docs.tigera.io/getting-started/kubernetes/quickstart
+# https://projectcalico.docs.tigera.io/manifests/tigera-operator.yaml
+# curl -L https://projectcalico.docs.tigera.io/manifests/custom-resources.yaml | sed 's|192.168.0.0/16|{{ k8s_networking.pod }}|' | tee templates/addons-cni-calico.yaml.j2
+---
+-   hosts: k8s_hosts
+    gather_facts: false
+    become: true
+    tasks:
+
+    # https://projectcalico.docs.tigera.io/maintenance/clis/calicoctl/install
+    # https://projectcalico.docs.tigera.io/maintenance/clis/calicoctl/configure/
+    -   name: "cni - calico - calicoctl"
+        ansible.builtin.get_url:
+            url: "https://{{ download_cdn }}github.com/projectcalico/calico/releases/download/{{ version.calico }}/calicoctl-linux-amd64"
+            dest: /usr/local/bin/calicoctl
+            mode: a+x
+
+-   hosts: k8s_adm_hosts[0]
+    gather_facts: false
+    become: true
+    tasks:
+
+    # https://projectcalico.docs.tigera.io/manifests/custom-resources.yaml
+    -   name: "cni - calico - bgp manifests"
+        ansible.builtin.template:
+            src: templates/addons-cni-calico-bgp.yaml.j2
+            dest: "{{ k8s.dir }}/kubeadm/calico-bgp.yaml"
+        notify: apply addons/cni/calico
+    -   meta: flush_handlers
+
+    # https://projectcalico.docs.tigera.io/networking/bgp#disable-the-default-bgp-node-to-node-mesh
+    # https://projectcalico.docs.tigera.io/reference/resources/bgpconfig
+    -   name: "cni - calico - bgp confs"
+        ansible.builtin.template:
+            dest: "{{ k8s.dir }}/kubeadm/calico-{{ item }}"
+            src: "templates/addons-cni-calico-{{ item }}.j2"
+        loop:
+        -   bgp-peer.yaml
+        -   bgp-configuration.yaml
+
+    # https://projectcalico.docs.tigera.io/networking/bgp#configure-a-node-to-act-as-a-route-reflector
+    # https://projectcalico.docs.tigera.io/networking/bgp#disable-the-default-bgp-node-to-node-mesh
+    # Configure a node to act as a route reflector
+    -   name: "cni - calico - iBGP"
+        # ⚠️前述 operator 和 resources 尚未执行完毕，立即执行会出错，
+        # 故此使用特殊标签 never：
+        # 1. 正常调用剧本不会执行此剧目
+        # 2. `ansible-playbook 30-cni-calico-bgp.yml -t bgp-reflector`
+        tags:
+        -   never
+        -   bgp-reflector
+        ansible.builtin.shell: |
+            {% for host in groups.k8s_node_hosts[:2] %}
+            # Calico nodes can be configured to act as route reflectors.
+            # To do this, each node that you want to act as a route reflector must have a cluster ID - typically an unused IPv4 address.
+            calicoctl patch node {{ host }} -p '{"spec": {"bgp": {"routeReflectorClusterID": "244.0.0.1"}}}'
+            #
+            # Typically, you will want to label this node to indicate that it is a route reflector, allowing it to be easily selected by a BGPPeer resource.
+            kubectl label node {{ host }} --overwrite route-reflector=true
+            {% endfor %}
+
+    # Disable the default BGP node-to-node mesh
+    -   name: "cni - calico - BGPConfiguration"
+        # ⚠️前述 operator 和 resources 尚未执行完毕，立即执行会出错，
+        # 故此使用特殊标签 never：
+        # 1. 正常调用剧本不会执行此剧目
+        # 2. `ansible-playbook 30-cni-calico-bgp.yml -t bgp-no-mesh`
+        tags:
+        -   never
+        -   bgp-no-mesh
+        ansible.builtin.shell: |
+            # configure route reflector nodes to peer with each other and other non-route-reflector nodes using label selectors.
+            kubectl apply -f {{ k8s.dir }}/kubeadm/calico-bgp-peer.yaml
+            # Disable the default BGP node-to-node mesh
+            kubectl apply -f {{ k8s.dir }}/kubeadm/calico-bgp-configuration.yaml
+
+    handlers:
+    # https://projectcalico.docs.tigera.io/getting-started/kubernetes/quickstart
+    # https://projectcalico.docs.tigera.io/manifests/tigera-operator.yaml
+    -   name: apply addons/cni/calico
+        ansible.builtin.shell: |
+            kubectl apply -f https://{{ download_cdn }}projectcalico.docs.tigera.io/manifests/tigera-operator.yaml
+            kubectl apply -f {{ k8s.dir }}/kubeadm/calico-bgp.yaml

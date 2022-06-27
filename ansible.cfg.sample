@@ -1,0 +1,4 @@
+[defaults]
+# 为区分集群，每个集群单独一个目录
+inventory = inventories/XX
+remote_user = root

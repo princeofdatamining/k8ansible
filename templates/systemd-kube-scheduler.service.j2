@@ -1,0 +1,14 @@
+[Unit]
+Description=Kubernetes Scheduler
+Documentation=https://kubernetes.io/docs/reference/command-line-tools-reference/kube-scheduler/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# Type=notify
+ExecStart=/usr/local/bin/kube-scheduler
+Restart=always
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

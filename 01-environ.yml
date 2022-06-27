@@ -1,0 +1,156 @@
+# 环境准备
+# 1. 停用 swap
+# 2. 停用 selinux
+# 3. 停用防火墙
+# 4. 设置时区，启用时间同步
+# 5. 设置 /etc/hosts
+# 6. export KUBECONFIG
+# 7. yum install ...
+# 8. export ETCD_ 环境变量
+# 9. 生成 kubeadm init phases 需要的 config 文件
+---
+-   hosts:
+    -   k8s_adm_hosts
+    -   k8s_hosts
+    become: true
+    tasks:
+    # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/#before-you-begin
+    # Swap disabled. You MUST disable swap in order for the kubelet to work properly.
+    # sed -i 's/^\s*\([^#].*\s\+swap\s\+.*\)$/#\1/' /etc/fstab
+    -   name: disable swap
+        ansible.builtin.lineinfile:
+            path: /etc/fstab
+            backrefs: true
+            regexp: '^(\s*[^#].*\s+swap\s+.*)$'
+            line: '#\1'
+        notify: disable swap
+    -   meta: flush_handlers
+
+    # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/troubleshooting-kubeadm/#coredns-pods-have-crashloopbackoff-or-error-state
+    # Warning: Disabling SELinux can compromise the security of your cluster.
+    # sed -i 's|^\s*SELINUX=.*|SELINUX=permissive|g' /etc/sysconfig/selinux
+    -   name: disable SELinux
+        ansible.posix.selinux:
+            policy: targeted
+            state: permissive
+        notify: disable selinux
+    -   meta: flush_handlers
+
+    # https://kubernetes.io/docs/reference/ports-and-protocols/
+    # 如果不关闭，需要设置上述链接中的所有策略
+    # systemctl disable --now firewalld
+    -   name: disable firewalld
+        ansible.builtin.systemd:
+            name: firewalld
+            state: stopped
+            enabled: false
+
+    # 设置时区
+    # ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+    -   name: set localtime
+        community.general.timezone:
+            name: Asia/Shanghai
+
+    # 时间同步
+    -   name: enable ntp
+        ansible.builtin.systemd:
+            name: chronyd
+            state: started
+            enabled: true
+
+    # 域名解析
+    -   name: set /etc/hosts
+        ansible.builtin.blockinfile:
+            path: /etc/hosts
+            block: |
+                {% for host in groups.k8s_cp_hosts | sort %}
+                {{ hostvars[host].ansible_facts.default_ipv4.address }} {{ hostvars[host].ansible_facts.nodename }}
+                {% endfor %}
+                {% if k8s_slb.domain_name != "" %}
+                {{ k8s_slb.ip | default(hostvars[groups.k8s_adm_hosts[0]].ansible_facts.default_ipv4.address, true) }} {{ k8s_slb.domain_name }} # Load Balance
+                {% endif +%}
+            marker: "#### {mark} ANSIBLE MANAGED BLOCK - k8s"
+            state: present
+
+    # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/#more-information
+    # export KUBECONFIG
+    -   name: export KUBECONFIG
+        ansible.builtin.blockinfile:
+            path: ~/.bashrc
+            block: |
+                export KUBECONFIG={{ k8s.dir }}/{% if inventory_hostname in groups.k8s_cp_hosts %}admin{% else %}kubelet{% endif %}.conf
+
+                # https://projectcalico.docs.tigera.io/maintenance/clis/calicoctl/configure/kdd
+                export CALICO_DATASTORE_TYPE=kubernetes
+            marker: "#### {mark} ANSIBLE MANAGED BLOCK - KUBECONFIG"
+
+    # 1. 常用软件
+    # 2. kubeadm init 警告/错误处理
+    # ✅[WARNING FileExisting-socat]: socat not found in system path
+    # ✅[ERROR FileExisting-conntrack]: conntrack not found in system path
+    -   name: install apps to fixing preflight warning and providing tools
+        ansible.builtin.yum:
+            name:
+            -   ipvsadm
+            -   socat
+            -   conntrack-tools
+            -   bind-utils
+            -   telnet
+            -   tree
+            -   git
+            state: present
+
+    -   name: force directories
+        ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+        loop:
+        -   "{{ k8s.dir }}"
+        -   "{{ k8s.dir }}/kubeadm"
+
+    handlers:
+    -   name: disable selinux
+        command: setenforce 0
+    -   listen: disable swap
+        command: swapoff -a
+    -   listen: disable swap
+        command: sysctl -w vm.swappiness=0
+    # cat /proc/sys/vm/swappiness
+
+-   hosts: k8s_etcd_hosts
+    become: true
+    tasks:
+    # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/setup-ha-etcd-with-kubeadm/#setting-up-the-cluster
+    # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/#more-information
+    # 终端自动加载 etcdctl 配置
+    -   name: export ETCD_XXX variables
+        ansible.builtin.blockinfile:
+            path: ~/.bashrc
+            block: |
+                export ETCDCTL_API=3
+                export ETCD_ENDPOINTS={{ K8S_ETCD_ENDPOINTS }}
+                export ETCD_CA={{ k8s_pki.dir }}/etcd/ca.crt
+                export ETCD_CERT={{ k8s_pki.dir }}/etcd/server.crt
+                export ETCD_KEY={{ k8s_pki.dir }}/etcd/server.key
+            marker: "#### {mark} ANSIBLE MANAGED BLOCK - etcdctl"
+
+-   hosts:
+    -   k8s_etcd_hosts
+    -   k8s_cp_hosts
+    gather_facts: false
+    become: true
+    tasks:
+    -   name: kubeadm/init-etcd.yaml
+        ansible.builtin.template:
+            dest: "{{ k8s.dir }}/kubeadm/init-etcd.yaml"
+            src:  "templates/kubeadm-config-etcd.yaml.j2"
+
+-   hosts:
+    -   k8s_cp_hosts
+    gather_facts: false
+    become: true
+    tasks:
+    -   name: kubeadm/init.yaml
+        ansible.builtin.template:
+            dest: "{{ k8s.dir }}/kubeadm/init.yaml"
+            src:  "templates/kubeadm-config-init.yaml.j2"

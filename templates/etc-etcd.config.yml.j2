@@ -1,0 +1,27 @@
+---
+# https://github.com/etcd-io/etcd/blob/main/etcd.conf.yml.sample
+# This is the configuration file for the etcd server.
+
+advertise-client-urls: https://{{ ansible_facts.default_ipv4.address }}:2379
+client-transport-security:
+    # Path to the client server TLS cert file.
+    cert-file: "{{ k8s_pki.dir }}/etcd/server.crt"
+    key-file: "{{ k8s_pki.dir }}/etcd/server.key"
+    client-cert-auth: true
+    trusted-ca-file: "{{ k8s_pki.dir }}/etcd/ca.crt"
+    auto-tls: true
+data-dir: "{{ k8s_etcd.data_dir }}"
+# experimental-initial-corrupt-check: true
+initial-advertise-peer-urls: https://{{ ansible_facts.default_ipv4.address }}:2380
+initial-cluster: "{{ K8S_ETCD_CLUSTER }}"
+listen-client-urls: https://127.0.0.1:2379,https://{{ ansible_facts.default_ipv4.address }}:2379
+listen-metrics-urls: http://127.0.0.1:2381
+listen-peer-urls: https://{{ ansible_facts.default_ipv4.address }}:2380
+name: "{{ ansible_facts.nodename }}"
+peer-transport-security:
+    # Path to the peer server TLS cert file.
+    cert-file: "{{ k8s_pki.dir }}/etcd/peer.crt"
+    key-file: "{{ k8s_pki.dir }}/etcd/peer.key"
+    client-cert-auth: true
+    trusted-ca-file: "{{ k8s_pki.dir }}/etcd/ca.crt"
+    auto-tls: true

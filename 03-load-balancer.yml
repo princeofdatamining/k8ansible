@@ -1,0 +1,100 @@
+# https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/high-availability/#create-load-balancer-for-kube-apiserver
+# https://keepalived.readthedocs.io/en/latest/index.html
+---
+-   hosts:
+    -   k8s_adm_hosts
+    -   k8s_cp_ha_hosts
+    -   k8s_traffic_ha_hosts
+    become: true
+    tasks:
+    -   name: install keepalived
+        ansible.builtin.yum:
+            name: keepalived
+            state: present
+        notify: init /etc/keepalived/keepalived.conf
+        when: ansible_host in groups.k8s_cp_ha_hosts or ansible_host in groups.k8s_traffic_ha_hosts
+    -   meta: flush_handlers
+
+    # 如果 IP 为空，或者跟第一个控制平面主机相同，则跳过
+    -   name: control plane slb
+        ansible.builtin.blockinfile:
+            path: /etc/keepalived/keepalived.conf
+            block: |
+                # https://keepalived.readthedocs.io/en/latest/configuration_synopsis.html#vrrp-instance-definitions-synopsis
+                vrrp_instance {{ SLB.vrrp_instance_name }} {
+                    state {% if ansible_host == HOSTS[0] %}MASTER{% else %}BACKUP{% endif +%}
+                    interface {{ ansible_facts.default_ipv4.interface }}
+                    virtual_router_id {{ SLB.virtual_router_id }}
+                    priority {% if ansible_host == HOSTS[0] %}101{% else %}100{% endif +%}
+                    advert_int 1
+                    authentication {
+                        auth_type PASS
+                        auth_pass {{ SLB.vrrp_auth_pass }}
+                    }
+                    virtual_ipaddress {
+                        {{ SLB.ip }}
+                    }
+                    mcast_src_ip {{ ansible_facts.default_ipv4.address }}
+                }
+            marker: "#### {mark} ANSIBLE MANAGED BLOCK - {{ MARKER }} slb"
+        vars:
+            SLB: "{{ k8s_slb }}"
+            HOSTS: "{{ groups.k8s_cp_ha_hosts }}"
+            MARKER: "control plane"
+        notify: restart keepalived
+        when: ansible_host in HOSTS and SLB.ip != "" and SLB.ip != hostvars[groups.k8s_adm_hosts[0]].ansible_facts.default_ipv4.address
+
+    # 如果 IP 为空，或者跟第一个控制平面主机相同，则跳过
+    -   name: traffic slb
+        ansible.builtin.blockinfile:
+            path: /etc/keepalived/keepalived.conf
+            block: |
+                # https://keepalived.readthedocs.io/en/latest/configuration_synopsis.html#vrrp-instance-definitions-synopsis
+                vrrp_instance {{ SLB.vrrp_instance_name }} {
+                    state {% if ansible_host == HOSTS[0] %}MASTER{% else %}BACKUP{% endif +%}
+                    interface {{ ansible_facts.default_ipv4.interface }}
+                    virtual_router_id {{ SLB.virtual_router_id }}
+                    priority {% if ansible_host == HOSTS[0] %}101{% else %}100{% endif +%}
+                    advert_int 1
+                    authentication {
+                        auth_type PASS
+                        auth_pass {{ SLB.vrrp_auth_pass }}
+                    }
+                    virtual_ipaddress {
+                        {{ SLB.ip }}
+                    }
+                    mcast_src_ip {{ ansible_facts.default_ipv4.address }}
+                }
+            marker: "#### {mark} ANSIBLE MANAGED BLOCK - {{ MARKER }} slb"
+        vars:
+            SLB: "{{ k8s_traffic_slb }}"
+            HOSTS: "{{ groups.k8s_traffic_ha_hosts }}"
+            MARKER: "traffic"
+        notify: restart keepalived
+        when: ansible_host in HOSTS and SLB.ip != "" and SLB.ip != hostvars[groups.k8s_adm_hosts[0]].ansible_facts.default_ipv4.address
+
+    handlers:
+    -   name: init /etc/keepalived/keepalived.conf
+        ansible.builtin.copy:
+            dest: /etc/keepalived/keepalived.conf
+            content: |
+                ! Configuration File for keepalived
+
+                # https://keepalived.readthedocs.io/en/latest/configuration_synopsis.html#global-definitions-synopsis
+                global_defs {
+                    router_id LVS_DEVEL
+                }
+
+                #### BEGIN ANSIBLE MANAGED BLOCK - control plane slb
+                #### END ANSIBLE MANAGED BLOCK - control plane slb
+
+                #### BEGIN ANSIBLE MANAGED BLOCK - traffic slb
+                #### END ANSIBLE MANAGED BLOCK - traffic slb
+
+                # https://keepalived.readthedocs.io/en/latest/configuration_synopsis.html#virtual-server-definitions-synopsis
+
+    -   name: restart keepalived
+        ansible.builtin.service:
+            name: keepalived
+            enabled: true
+            state: restarted

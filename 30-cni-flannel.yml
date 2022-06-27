@@ -1,0 +1,25 @@
+# You should now deploy a pod network to the cluster.
+# Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
+# https://kubernetes.io/docs/concepts/cluster-administration/addons/
+#
+# https://github.com/flannel-io/flannel#deploying-flannel-manually
+# https://github.com/flannel-io/flannel/blob/v0.18.1/Documentation/kubernetes.md
+# https://github.com/flannel-io/flannel/blob/v0.18.1/Documentation/kube-flannel.yml
+#
+# https://msazure.club/flannel-networking-demystify/
+# https://msazure.club/content/images/2018/05/flannel-network-flow.jpg
+---
+-   hosts: k8s_adm_hosts[0]
+    gather_facts: false
+    become: true
+    tasks:
+    -   name: "cni - flannel manifest"
+        ansible.builtin.template:
+            src: templates/addons-cni-flannel.yaml.j2
+            dest: "{{ k8s.dir }}/kubeadm/flannel.yaml"
+        notify: apply addons/cni/flannel
+
+    handlers:
+    -   name: apply addons/cni/flannel
+        ansible.builtin.shell: |
+            kubectl apply -f {{ k8s.dir }}/kubeadm/flannel.yaml

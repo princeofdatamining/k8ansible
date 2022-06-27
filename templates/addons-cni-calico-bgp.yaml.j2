@@ -1,0 +1,39 @@
+# This section includes base Calico installation configuration.
+# For more information, see: https://projectcalico.docs.tigera.io/v3.23/reference/installation/api#operator.tigera.io/v1.Installation
+apiVersion: operator.tigera.io/v1
+kind: Installation
+metadata:
+  name: default
+spec:
+  # Configures Calico networking.
+  calicoNetwork:
+    # Note: The ipPools section cannot be modified post-install.
+    # https://projectcalico.docs.tigera.io/reference/installation/api#operator.tigera.io/v1.IPPool
+    ipPools:
+    - blockSize: 26
+      cidr: {{ k8s_networking.pod }}
+      ### BGP(in subnet) + IP-in-IP overlay(cross subnet)
+      ### https://projectcalico.docs.tigera.io/networking/determine-best-networking#on-prem
+      ### https://projectcalico.docs.tigera.io/reference/installation/api#operator.tigera.io/v1.EncapsulationType
+      # encapsulation: VXLANCrossSubnet
+      # encapsulation: IPIPCrossSubnet
+      encapsulation: None
+      natOutgoing: Enabled
+      nodeSelector: all()
+    ### BGP(in subnet) + IP-in-IP overlay(cross subnet)
+    ### You can run non-overlay mode if the cluster is within a single L2 network, with Calico just peering BGP between the nodes in the cluster.
+    ### Even though this is not strictly an overlay network, the pod IPs are not routable outside of the cluster, because the broader network does not have routes for the pod IPs.
+    ### Alternatively you can run Calico in either VXLAN or IP-in-IP overlay mode, with cross-subnet overlay mode to optimize performance within each L2 subnet.
+    ### https://projectcalico.docs.tigera.io/networking/determine-best-networking#on-prem
+    ### https://projectcalico.docs.tigera.io/reference/installation/api#operator.tigera.io/v1.BGPOption
+    bgp: Enabled
+
+---
+
+# This section configures the Calico API server.
+# For more information, see: https://projectcalico.docs.tigera.io/v3.23/reference/installation/api#operator.tigera.io/v1.APIServer
+apiVersion: operator.tigera.io/v1
+kind: APIServer 
+metadata: 
+  name: default 
+spec: {}

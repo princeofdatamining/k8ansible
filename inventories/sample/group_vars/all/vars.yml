@@ -1,0 +1,82 @@
+---
+# kubernetes 和 etcd 版本
+version:
+    k8s: "v1.24.0"
+    etcd: "v3.5.4"
+    cni: "v1.1.0"
+    cni_plugins_checksum: "sha256:05d46ac19d01669d424ee57401c0deba101763ac494858064b4ea4ffdcc37c5d"
+    calico: "v3.23.2"
+
+# 下载代理(⚠️如需代理，观察URL格式)
+download_cdn: "" # 从源站下载
+# download_cdn: "files.your.org/" # 示例
+
+k8s_networking:
+    # ⚠️谨慎设置，不要互相重叠(包括与宿主机网段)
+    service: "192.168.0.0/16" # TODO: change it if necessary.
+    pod: "172.16.0.0/16" # TODO: change it if necessary.
+    cni_plugins_url: "https://{{ download_cdn }}github.com/containernetworking/plugins/releases/download/{{ version.cni }}/cni-plugins-linux-amd64-{{ version.cni }}.tgz"
+    proxy_mode: "ipvs"
+k8s_slb:
+    # 控制平面负载均衡需要自行设置(简单做法：使用 k8s_adm_hosts 对应主机的地址和域名即可)
+    # 1. 如果域名不为空，但地址为空， /etc/hosts 中会写入 k8s_adm_hosts 对应主机的地址
+    # 2. 如果地址为空，或者地址与 k8s_adm_hosts 对应主机的地址相同， keepalived 不处理该地址
+    domain_name: "k8s.your.org" # TODO: change it.
+    ip: "" # TODO: change it if necessary.
+    vrrp_instance_name: "VI_1"
+    virtual_router_id: "51"
+    vrrp_auth_pass: "hello" # TODO: change it.
+k8s_traffic_slb:
+    # 外部流量负载均衡
+    # 1. 该域名和地址不会写入 /etc/hosts 文件中
+    # 2. 如果地址为空，或者地址与 k8s_adm_hosts 对应主机的地址相同， keepalived 不处理该地址
+    domain_name: "k8.your.org" # TODO: change it.
+    ip: "" # TODO: change it if necessary.
+    vrrp_instance_name: "VI_2"
+    virtual_router_id: "52"
+    vrrp_auth_pass: "world" # TODO: change it.
+
+k8s_image:
+    # CRI/containerd 镜像设置
+    containerd:
+        # 默认镜像仓库
+        mirror_host: "" # "https://cr.your.org"
+
+        # 特殊镜像仓库(懂的就懂)
+        wall_mirror_host: "" # "https://cr2.your.org"
+
+        # 是否跳过验证
+        skip_verify: "false"
+
+k8s_releases:
+    # 控制平面组件(二进制)
+    control_plane:
+    -   { "file": "kube-apiserver"         , "url": "https://{{ download_cdn }}dl.k8s.io/{{ version.k8s }}/bin/linux/amd64/kube-apiserver"         , "checksum": "sha256:8819c07d68ea37fdc8b38581b874bd8276de28547cc4ed9b7b907b10fc98e067" }
+    -   { "file": "kube-controller-manager", "url": "https://{{ download_cdn }}dl.k8s.io/{{ version.k8s }}/bin/linux/amd64/kube-controller-manager", "checksum": "sha256:81653c4528eef76aff9a2f258c60a8e96b9a47700086ab968f30fc13d111ace6" }
+    -   { "file": "kube-scheduler"         , "url": "https://{{ download_cdn }}dl.k8s.io/{{ version.k8s }}/bin/linux/amd64/kube-scheduler"         , "checksum": "sha256:318056b7cb76d75070fdf691a8a32b5daa5597938c64ef05c61cf0379bd6ed9d" }
+    # 普通节点组件(二进制)
+    node:
+    -   { "file": "kube-proxy"             , "url": "https://{{ download_cdn }}dl.k8s.io/{{ version.k8s }}/bin/linux/amd64/kube-proxy"             , "checksum": "sha256:a036d3ba31a917a573ed231ab9e3cbff38d6c730304d19982a15b4efc8f0101f" }
+    -   { "file": "kubeadm"                , "url": "https://{{ download_cdn }}dl.k8s.io/{{ version.k8s }}/bin/linux/amd64/kubeadm"                , "checksum": "sha256:5e58a29eaaf69ea80e90d9780d2a2d5f189fd74f94ec3bec9e3823d472277318" }
+    -   { "file": "kubectl"                , "url": "https://{{ download_cdn }}dl.k8s.io/{{ version.k8s }}/bin/linux/amd64/kubectl"                , "checksum": "sha256:94d686bb6772f6fb59e3a32beff908ab406b79acdfb2427abdc4ac3ce1bb98d7" }
+    -   { "file": "kubelet"                , "url": "https://{{ download_cdn }}dl.k8s.io/{{ version.k8s }}/bin/linux/amd64/kubelet"                , "checksum": "sha256:3d98ac8b4fb8dc99f9952226f2565951cc366c442656a889facc5b1b2ec2ba52" }
+    -   { "file": "crictl"                 , "url": "https://{{ download_cdn }}github.com/kubernetes-sigs/cri-tools/releases/download/{{ version.k8s }}/crictl"  , "checksum": "sha256:b557e7a7d4eb2bf25485358d3f1ae530452ee6ed391cddb4b0d2415d6ea6a4b9" }
+    # etcd & etcdctl(二进制)
+    etcd:
+    -   { "file": "etcd"                   , "url": "https://{{ download_cdn }}github.com/etcd-io/etcd/releases/download/{{ version.etcd }}/etcd"   , "checksum": "sha256:8a0c4363beb6c2087c32b4e5cb6d5bb820e199c8019359b9fe94df5617551a5e" }
+    -   { "file": "etcdctl"                , "url": "https://{{ download_cdn }}github.com/etcd-io/etcd/releases/download/{{ version.etcd }}/etcdctl", "checksum": "sha256:ec2ce88d2d74b262ecb1f614404a29084f84ce9789442ba7b7f182183ceef0e7" }
+
+    # docker-ce repo 代理设置
+    docker_ce_repo_url: "https://download.docker.com" # 源站
+    # docker_ce_repo_url: "https://mirrors.ustc.edu.cn/docker-ce" # USTC
+
+    # containerd 版本
+    cri:
+        yum_name: "containerd.io-1.6.4"
+
+k8s:
+    dir: "/etc/kubernetes"
+k8s_pki:
+    dir: "{{ k8s.dir }}/pki"
+k8s_etcd:
+    data_dir: "/var/lib/etcd"

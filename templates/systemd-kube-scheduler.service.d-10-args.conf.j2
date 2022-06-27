@@ -1,0 +1,8 @@
+[Service]
+# This is a file that "kubeadm" generates at runtime, populating the KUBE_SCHEDULER_EXTRA_ARGS variable dynamically
+EnvironmentFile=-/var/lib/kubelet/kube-scheduler.env
+# This is a file that the user can use for overrides of the kubelet args as a last resort.
+# KUBE_SCHEDULER_EXTRA_ARGS should be sourced from this file.
+EnvironmentFile=-/etc/default/kube-scheduler
+ExecStart=
+ExecStart=/usr/local/bin/kube-scheduler $KUBE_SCHEDULER_EXTRA_ARGS

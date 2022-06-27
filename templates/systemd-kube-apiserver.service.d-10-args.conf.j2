@@ -1,0 +1,8 @@
+[Service]
+# This is a file that "kubeadm" generates at runtime, populating the KUBE_APISERVER_EXTRA_ARGS variable dynamically
+EnvironmentFile=-/var/lib/kubelet/kube-apiserver.env
+# This is a file that the user can use for overrides of the kubelet args as a last resort.
+# KUBE_APISERVER_EXTRA_ARGS should be sourced from this file.
+EnvironmentFile=-/etc/default/kube-apiserver
+ExecStart=
+ExecStart=/usr/local/bin/kube-apiserver $KUBE_APISERVER_EXTRA_ARGS

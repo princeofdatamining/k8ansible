@@ -1,0 +1,21 @@
+# 从 hosts 和 vars 推导出复杂变量，以直接使用(例如 etcd 集群配置)
+---
+-   name: collecting facts
+    hosts: all
+    tasks: []
+
+-   hosts: localhost
+    vars:
+        short_names: "{{ groups.k8s_etcd_hosts | map('extract', hostvars, ['ansible_facts', 'nodename']) | list }}"
+        ip_addrs:    "{{ groups.k8s_etcd_hosts | map('extract', hostvars, ['ansible_facts', 'default_ipv4', 'address']) | list }}"
+    tasks:
+    # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/setup-ha-etcd-with-kubeadm/#setting-up-the-cluster
+    #   initial-cluster
+    -   name: group_vars/all/generated_etcd.yml
+        ansible.builtin.copy:
+            dest: "{{ ansible_inventory_sources[0] }}/group_vars/all/generated_etcd.yml"
+            content: |
+                ---
+                K8S_ETCD_CLUSTER: '{{ short_names | zip(ip_addrs | zip_longest([], fillvalue=":2380") | map("join", "")) | map("join", "=https://") | join(",") }}'
+                K8S_ETCD_ENDPOINTS: '{{ (ip_addrs | zip_longest([], fillvalue=":2379") | map("join", "")) | join(",") }}'
+                K8S_ETCD_SERVERS: '{{ (([] | zip_longest(ip_addrs, fillvalue="https://") | map("join", "")) | zip_longest([], fillvalue=":2379") | map("join", "")) | join(",") }}'

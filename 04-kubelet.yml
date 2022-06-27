@@ -1,0 +1,37 @@
+# https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/#installing-kubeadm-kubelet-and-kubectl
+# Configure, enable and start kubelet systemd service
+---
+-   hosts: k8s_hosts
+    become: true
+    tasks:
+    # dropin works with kubeadm and kubelet
+    -   name: force dropin directory
+        ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+        loop:
+        -   "/etc/systemd/system/kubelet.service.d"
+        -   "{{ k8s.dir }}/manifests"
+        -   "/var/lib/kubelet"
+
+    # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/#k8s-install-2
+    # https://github.com/kubernetes/release/blob/v0.13.0/cmd/kubepkg/templates/latest/rpm/kubelet/kubelet.service
+    -   name: kubelet.service
+        ansible.builtin.template:
+            dest: "/etc/systemd/system/kubelet.service"
+            src:  "templates/systemd-kubelet.service.j2"
+        notify: reload daemon
+
+    # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/kubelet-integration/
+    # https://github.com/kubernetes/release/blob/v0.13.0/cmd/kubepkg/templates/latest/rpm/kubeadm/10-kubeadm.conf
+    -   name: kubelet dropin
+        ansible.builtin.template:
+            dest: "/etc/systemd/system/kubelet.service.d/10-kubeadm.conf"
+            src:  "templates/systemd-kubelet.service.d-10-kubeadm.conf.j2"
+        notify: reload daemon
+
+    handlers:
+    -   listen: reload daemon
+        ansible.builtin.service:
+            name: kubelet
+            enabled: true
